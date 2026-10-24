@@ -58,6 +58,34 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools is enough).
   private is linked at build time) to enumerate Spaces, read the active one, and
   attempt a real Space switch — all from our own process, SIP on. Everything is
   non-destructive; missing symbols or an OS refusal degrade to the synthetic cube.
+- `CompositorBridge` / `YabaiBridge` relay the privileged foreign-window ops to an
+  installed yabai; `NoteWindow(foreignTexture:frame:)` reuses the effect pipeline
+  to burn a captured copy of another app's window. See *Foreign windows* above.
+
+## Foreign windows (experimental)
+
+`Effects ▸ Burn frontmost window` (`⌘B`) runs the burn on **another app's**
+window. Since no app can run a shader inside a foreign window, it works by
+capture-and-overlay:
+
+1. enumerate on-screen windows and capture the target live (ScreenCaptureKit,
+   SIP on — verified: see `--test-foreign`);
+2. ask a **compositor bridge** to hide the real window (`setOpacity(0)`);
+3. float a macompiz overlay of the captured pixels and burn *that*;
+4. close the real window through the bridge when the burn finishes.
+
+The bridge is the only privileged piece. `CompositorBridge` has two
+implementations: `YabaiBridge`, which drives an already-installed
+[yabai](https://github.com/koekeishiya/yabai) (its audited scripting addition is
+what actually touches foreign windows, and needs SIP partially disabled — see
+[docs/SIP.md](docs/SIP.md)); and `NullBridge`, the default, where there's no
+privileged helper. With `NullBridge` the burn still plays as a **visual-only**
+overlay, but the real window can't be hidden or closed. macompiz ships **no
+injector of its own** — the privileged code stays in yabai.
+
+Per-pixel effects (burn/wobble/water) on foreign windows only work through this
+overlay path. Plain window ops (opacity, move, close) go straight through the
+bridge to every window.
 
 ## Scope & the "real compositor" question
 

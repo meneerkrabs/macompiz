@@ -21,6 +21,21 @@ final class NoteWindow: NSWindow {
         noteView.hostWindow = self
     }
 
+    // Overlay that floats a captured foreign window's pixels, so the effect
+    // pipeline (burn/wobble/water) can run on top of another app's window.
+    init(foreignTexture tex: MTLTexture, frame: CGRect) {
+        noteView = NoteMetalView(externalTexture: tex, size: frame.size)
+        super.init(contentRect: frame, styleMask: [.borderless],
+                   backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        level = .floating
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        contentView = noteView
+        noteView.hostWindow = self
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
@@ -51,11 +66,33 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
     private var burnProgress: Float = 0
     var onBurnedAway: (() -> Void)?
 
+    private let external: Bool
+
     init(title: String, body: String, size: CGSize) {
         self.noteTitle = title
         self.noteBody = body
         self.noteSize = size
+        self.external = false
         super.init(frame: CGRect(origin: .zero, size: size), device: GPU.shared.device)
+        configure(size: size)
+        rebuildTexture()
+    }
+
+    // Overlay a captured foreign window: same effect pipeline, but the texture
+    // is supplied by the caller (a ScreenCaptureKit grab) instead of a note.
+    init(externalTexture tex: MTLTexture, size: CGSize) {
+        self.noteTitle = ""
+        self.noteBody = ""
+        self.noteSize = size
+        self.external = true
+        super.init(frame: CGRect(origin: .zero, size: size), device: GPU.shared.device)
+        configure(size: size)
+        texture = tex
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    private func configure(size: CGSize) {
         colorPixelFormat = .bgra8Unorm
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         layer?.isOpaque = false
@@ -64,12 +101,10 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
         preferredFramesPerSecond = 60
         delegate = self
         uniforms.aspect = Float(size.width / size.height)
-        rebuildTexture()
     }
 
-    required init(coder: NSCoder) { fatalError() }
-
     private func rebuildTexture() {
+        guard !external else { return }
         let scale = window?.backingScaleFactor ?? 2.0
         let px = CGSize(width: noteSize.width * scale, height: noteSize.height * scale)
         let img = NoteRenderer.image(title: noteTitle, body: noteBody, size: px)

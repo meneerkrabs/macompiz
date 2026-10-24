@@ -9,6 +9,26 @@ final class App {
             DemoImage.write(to: CommandLine.arguments[i + 1])
             exit(0)
         }
+        if CommandLine.arguments.contains("--test-foreign") {
+            _ = NSApplication.shared
+            Task {
+                let b = Bridges.resolve()
+                print("bridge=\(b.name) available=\(b.available)")
+                let wins = await ScreenCapture.foreignWindows()
+                print("foreign windows: \(wins.count)")
+                for w in wins.prefix(5) {
+                    print("  id=\(w.windowID) app=\(w.owningApplication?.applicationName ?? "?") " +
+                          "title=\(w.title ?? "") frame=\(w.frame)")
+                }
+                if let first = wins.first, let cg = await ScreenCapture.captureWindow(first) {
+                    print("captured first window: \(cg.width)x\(cg.height)")
+                } else {
+                    print("no window captured")
+                }
+                exit(0)
+            }
+            NSApplication.shared.run()
+        }
         if CommandLine.arguments.contains("--test-spaces") {
             let sl = SkyLight.shared
             print("SkyLight available=\(sl.available) canSwitch=\(sl.canSwitch) cid=\(sl.cid)")
@@ -45,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notes: [NoteWindow] = []
     private var cubeWindow: CubeWindow?
     private var currentSpace = 0
+
+    // Privileged bridge for touching foreign apps' windows (yabai or none).
+    private lazy var bridge: CompositorBridge = Bridges.resolve()
+    private var foreignOverlays: [NoteWindow] = []
 
     private let spaces: [(label: String, body: String, top: NSColor, bottom: NSColor)] = [
         ("MacOS Compiz?",
@@ -176,6 +200,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   hueTop: s.top, hueBottom: s.bottom, pixelSize: px)
     }
 
+    // MARK: foreign windows (capture + overlay effect)
+
+    // Burn the frontmost other-app window: capture it, hide the real one via the
+    // bridge (if present), and run the burn on a floating copy. Without a bridge
+    // it's a visual-only overlay — the effect plays but the real window stays.
+    @objc private func burnForeground() {
+        guard let screen = NSScreen.main else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let wins = await ScreenCapture.foreignWindows()
+            guard let target = wins.first,
+                  let cg = await ScreenCapture.captureWindow(target) else {
+                NSSound.beep(); return
+            }
+            let tex = GPU.shared.texture(from: cg)
+            let frame = self.toAppKitFrame(target.frame, screen: screen)
+            let overlay = NoteWindow(foreignTexture: tex, frame: frame)
+            let wid = CGWindowID(target.windowID)
+            let hid = self.bridge.available
+            if hid { self.bridge.setOpacity(wid, 0.0) }
+
+            overlay.noteView.onBurnedAway = { [weak self, weak overlay] in
+                overlay?.orderOut(nil)
+                if let overlay { self?.foreignOverlays.removeAll { $0 === overlay } }
+                if hid { self?.bridge.close(wid) }
+            }
+            overlay.makeKeyAndOrderFront(nil)
+            overlay.noteView.startBurn()
+            self.foreignOverlays.append(overlay)
+        }
+    }
+
+    // CG top-left window frame -> AppKit bottom-left screen frame (single display).
+    private func toAppKitFrame(_ cg: CGRect, screen: NSScreen) -> CGRect {
+        let h = screen.frame.height
+        return CGRect(x: cg.origin.x, y: h - cg.origin.y - cg.height,
+                      width: cg.width, height: cg.height)
+    }
+
     // MARK: menu / shortcuts
 
     private func buildMenu() {
@@ -194,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add(fxMenu, "Next space (cube)",  #selector(nextSpace), "]")
         add(fxMenu, "Prev space (cube)",  #selector(prevSpace), "[")
         add(fxMenu, "Splash (water)",     #selector(splash),    "w")
+        add(fxMenu, "Burn frontmost window", #selector(burnForeground), "b")
         add(fxMenu, "New note",           #selector(newNote),   "n")
 
         NSApp.mainMenu = main

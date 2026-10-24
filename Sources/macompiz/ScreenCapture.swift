@@ -38,6 +38,36 @@ enum ScreenCapture {
             return nil
         }
     }
+
+    /// On-screen, titled windows of *other* apps (ours excluded), front-to-back.
+    static func foreignWindows() async -> [SCWindow] {
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                true, onScreenWindowsOnly: true)
+            return content.windows.filter { w in
+                w.isOnScreen && (w.title?.isEmpty == false)
+                    && w.owningApplication?.processID != myPID
+                    && w.frame.width > 80 && w.frame.height > 60
+            }
+        } catch { return [] }
+    }
+
+    /// Capture a single window's current pixels (SIP-friendly, read-only).
+    static func captureWindow(_ window: SCWindow) async -> CGImage? {
+        do {
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let cfg = SCStreamConfiguration()
+            cfg.width = Int(window.frame.width * 2)
+            cfg.height = Int(window.frame.height * 2)
+            cfg.showsCursor = false
+            cfg.ignoreShadowsSingleWindow = true
+            return try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: cfg)
+        } catch {
+            return nil
+        }
+    }
 }
 
 extension NSScreen {
