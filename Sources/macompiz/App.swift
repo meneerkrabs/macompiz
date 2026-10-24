@@ -9,9 +9,24 @@ final class App {
             DemoImage.write(to: CommandLine.arguments[i + 1])
             exit(0)
         }
+        if CommandLine.arguments.contains("--ax-debug") {
+            _ = NSApplication.shared
+            _ = AXBridge.requestTrust()
+            Task {
+                let wins = await ScreenCapture.foreignWindows()
+                guard let t = wins.first(where: { $0.owningApplication?.applicationName == "Finder" })
+                        ?? wins.first else { print("no window"); exit(1) }
+                print("target id=\(t.windowID) app=\(t.owningApplication?.applicationName ?? "?")")
+                print(AXBridge().diagnose(CGWindowID(t.windowID)))
+                exit(0)
+            }
+            NSApplication.shared.run()
+        }
         if CommandLine.arguments.contains("--test-foreign") {
             _ = NSApplication.shared
+            _ = AXBridge.requestTrust()
             Task {
+                print("ax trusted=\(AXIsProcessTrusted())")
                 let b = Bridges.resolve()
                 print("bridge=\(b.name) available=\(b.available)")
                 let wins = await ScreenCapture.foreignWindows()
@@ -96,6 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
+        // Ask for Accessibility so foreign-window hide/close work (no SIP needed).
+        _ = AXBridge.requestTrust()
         if let demo = burnDemo {
             runBurnDemo(appName: demo.app, kind: demo.kind, png: demo.png)
             return

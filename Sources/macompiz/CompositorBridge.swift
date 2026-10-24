@@ -111,8 +111,12 @@ struct YabaiBridge: CompositorBridge {
 }
 
 enum Bridges {
-    /// Pick the best available privileged bridge, else a no-op.
+    /// Pick the best available bridge. Accessibility works with SIP on (hide via
+    /// off-screen move + close), so it's preferred; yabai only adds real
+    /// compositor opacity once its scripting addition is loaded (SIP off).
     static func resolve() -> CompositorBridge {
+        let ax = AXBridge()
+        if ax.available { return ax }
         if let y = YabaiBridge(), y.available { return y }
         return NullBridge()
     }

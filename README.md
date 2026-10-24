@@ -86,18 +86,27 @@ capture-and-overlay:
 3. float a macompiz overlay of the captured pixels and burn *that*;
 4. close the real window through the bridge when the burn finishes.
 
-The bridge is the only privileged piece. `CompositorBridge` has two
-implementations: `YabaiBridge`, which drives an already-installed
-[yabai](https://github.com/koekeishiya/yabai); and `NullBridge`, the default.
+`CompositorBridge` has three implementations, picked best-first:
 
-**Reality check on current macOS (tested, Tahoe 26, SIP on):** yabai with just
-the Accessibility permission gives us window *enumeration*, but modifying foreign
-windows — `--opacity` (hide during the effect) **and** `--close` (remove at the
-end) — both require yabai's scripting addition, which needs SIP partially
-disabled (`yabai --load-sa`, from Recovery; see [docs/SIP.md](docs/SIP.md)).
-Until then the animations still play as a **visual-only** overlay on a captured
-copy, but the real window stays. macompiz ships **no injector of its own** — the
-privileged code stays in yabai.
+- **`AXBridge` (default, no SIP changes).** Uses the public **Accessibility**
+  API. It can't do compositor opacity, so it *hides* the real window by moving it
+  off-screen during the effect and *closes* it by pressing its close button at the
+  end. Combined with the captured-copy overlay this gives the full
+  **hide → animate → close** flow with **SIP enabled** — no yabai, no Recovery.
+  Needs macompiz's own Accessibility permission (System Settings ▸ Privacy &
+  Security ▸ Accessibility). **Verified on macOS 26 (SIP on): the real window is
+  hidden during the burn and actually closed afterwards.**
+- **`YabaiBridge`.** Drives an installed [yabai](https://github.com/koekeishiya/yabai).
+  Only this adds *true compositor* opacity on the live window (no off-screen
+  trick) — and that one feature needs yabai's scripting addition with SIP
+  partially disabled (`yabai --load-sa`; see [docs/SIP.md](docs/SIP.md)). On
+  current macOS with SIP on, yabai's own `--opacity`/`--close` are no-ops, so
+  AXBridge is the one that actually works today.
+- **`NullBridge`.** No helper at all — the effect plays as a **visual-only**
+  overlay and the real window stays.
+
+macompiz ships **no injector of its own**; the only SIP-gated path routes through
+yabai, and the default path avoids it entirely.
 
 Per-pixel effects (burn/wobble/water) on foreign windows only work through this
 overlay path. Plain window ops (opacity, move, close) go straight through the
