@@ -12,6 +12,23 @@ source, so you only need a Swift toolchain — no full Xcode, no `metal` CLI.
 
 ![demo](docs/demo.png)
 
+## Effects in motion
+
+All rendered straight from macompiz's own Metal pipelines (offscreen, no screen
+capture) — regenerate with `scripts/make-gifs.sh`.
+
+| Wobbly windows | Water / aquarium | Desktop cube |
+| :---: | :---: | :---: |
+| ![wobbly](docs/gifs/wobbly.gif) | ![water](docs/gifs/water.gif) | ![cube](docs/gifs/cube.gif) |
+
+| Burn | Glide | Explode |
+| :---: | :---: | :---: |
+| ![burn](docs/gifs/burn.gif) | ![glide](docs/gifs/glide.gif) | ![explode](docs/gifs/explode.gif) |
+
+| Magic Lamp | Sidekick | Curved Fold |
+| :---: | :---: | :---: |
+| ![magic lamp](docs/gifs/magic-lamp.gif) | ![sidekick](docs/gifs/sidekick.gif) | ![curved fold](docs/gifs/curved-fold.gif) |
+
 ## What works
 
 | Effect | Trigger |

@@ -22,6 +22,12 @@ final class App {
             }
             NSApplication.shared.run()
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--render-gifs"),
+           i + 1 < CommandLine.arguments.count {
+            _ = NSApplication.shared
+            FrameLab.renderAll(to: CommandLine.arguments[i + 1])
+            exit(0)
+        }
         if CommandLine.arguments.contains("--test-foreign") {
             _ = NSApplication.shared
             _ = AXBridge.requestTrust()
