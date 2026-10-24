@@ -9,6 +9,16 @@ final class App {
             DemoImage.write(to: CommandLine.arguments[i + 1])
             exit(0)
         }
+        if CommandLine.arguments.contains("--test-spaces") {
+            let sl = SkyLight.shared
+            print("SkyLight available=\(sl.available) canSwitch=\(sl.canSwitch) cid=\(sl.cid)")
+            if let ds = sl.mainDisplaySpaces() {
+                print("spaces=\(ds.spaceIDs) current=\(ds.currentID) index=\(ds.currentIndex)")
+            } else {
+                print("could not enumerate spaces")
+            }
+            exit(0)
+        }
         if CommandLine.arguments.contains("--test-capture") {
             _ = NSApplication.shared          // TCC needs an app context
             Task {
@@ -78,51 +88,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: cube space switching
 
-    // Real desktop captures, cached per space. We can only capture the space
-    // we're currently on (peeking into other Spaces needs private APIs), so each
-    // space's real face is filled the first time we leave it; unseen spaces fall
-    // back to a synthetic desktop.
+    // Cached synthetic/real faces for spaces we fall back on.
     private var realFaces: [Int: MTLTexture] = [:]
 
     private func switchSpace(delta: Int) {
         guard cubeWindow == nil, let screen = NSScreen.main else { return }
-        let next = (currentSpace + delta + spaces.count) % spaces.count
-        let scale = screen.backingScaleFactor
-        let px = CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
-        let fromSpace = currentSpace
+        let px = pxSize(screen)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // snapshot the live desktop (notes still visible) as the outgoing face
-            if let cg = await ScreenCapture.capture(screen: screen) {
-                self.realFaces[fromSpace] = GPU.shared.texture(from: cg)
-            }
-            guard self.cubeWindow == nil else { return }
+            let sl = SkyLight.shared
 
-            let fromTex = self.realFaces[fromSpace] ?? self.tex(for: fromSpace, px: px)
-            let toTex = self.realFaces[next] ?? self.tex(for: next, px: px)
+            // outgoing face = the real current desktop (notes still visible)
+            let texA = await self.captureTex(screen: screen, exclude: [])
+                       ?? self.tex(for: self.currentSpace, px: px)
 
-            let cube = CubeWindow(screen: screen, faces: [fromTex, toTex], from: 0, to: 1) { [weak self] in
-                self?.endCube(landingOn: next)
+            // --- real space switch via SkyLight -----------------------------
+            if sl.available, sl.canSwitch,
+               let ds = sl.mainDisplaySpaces(), ds.spaceIDs.count > 1 {
+                let tIdx = (ds.currentIndex + delta + ds.spaceIDs.count) % ds.spaceIDs.count
+                let targetSID = ds.spaceIDs[tIdx]
+
+                // mask the raw OS switch behind a sticky cover window
+                let cover = self.makeCover(screen: screen)
+                cover.orderFrontRegardless()
+                let coverID = CGWindowID(cover.windowNumber)
+
+                if sl.setCurrentSpace(targetSID) {
+                    try? await Task.sleep(nanoseconds: 220_000_000)   // let it settle
+                    let texB = await self.captureTex(screen: screen, exclude: [coverID])
+                               ?? self.tex(for: min(tIdx, self.spaces.count - 1), px: px)
+                    cover.orderOut(nil)
+                    self.runCube(screen: screen, from: texA, to: texB) { [weak self] in
+                        self?.currentSpace = min(tIdx, (self?.spaces.count ?? 1) - 1)
+                    }
+                    return
+                }
+                cover.orderOut(nil)   // OS refused the switch -> synthetic below
             }
-            self.notes.forEach { $0.orderOut(nil) }
-            cube.makeKeyAndOrderFront(nil)
-            self.cubeWindow = cube
+
+            // --- fallback: synthetic cube, no real switch -------------------
+            let next = (self.currentSpace + delta + self.spaces.count) % self.spaces.count
+            self.realFaces[self.currentSpace] = texA
+            let texB = self.realFaces[next] ?? self.tex(for: next, px: px)
+            self.runCube(screen: screen, from: texA, to: texB) { [weak self] in
+                self?.currentSpace = next
+            }
         }
+    }
+
+    private func runCube(screen: NSScreen, from: MTLTexture, to: MTLTexture,
+                         onLand: @escaping () -> Void) {
+        let cube = CubeWindow(screen: screen, faces: [from, to], from: 0, to: 1) { [weak self] in
+            onLand()
+            self?.cubeWindow?.orderOut(nil)
+            self?.cubeWindow = nil
+        }
+        cube.makeKeyAndOrderFront(nil)
+        cubeWindow = cube
+    }
+
+    private func captureTex(screen: NSScreen, exclude: [CGWindowID]) async -> MTLTexture? {
+        if let cg = await ScreenCapture.capture(screen: screen, exclude: exclude) {
+            return GPU.shared.texture(from: cg)
+        }
+        return nil
+    }
+
+    private func makeCover(screen: NSScreen) -> NSWindow {
+        let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless],
+                         backing: .buffered, defer: false)
+        w.isOpaque = true
+        w.backgroundColor = .black
+        w.level = .screenSaver
+        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        return w
+    }
+
+    private func pxSize(_ screen: NSScreen) -> CGSize {
+        let s = screen.backingScaleFactor
+        return CGSize(width: screen.frame.width * s, height: screen.frame.height * s)
     }
 
     private func tex(for i: Int, px: CGSize) -> MTLTexture {
         let s = spaces[i]
         return SpaceFactory.space(label: s.label, body: s.body,
                                   hueTop: s.top, hueBottom: s.bottom, pixelSize: px)
-    }
-
-    private func endCube(landingOn index: Int) {
-        currentSpace = index
-        cubeWindow?.orderOut(nil)
-        cubeWindow = nil
-        // re-show notes only on the first space, mirroring the demo
-        if index == 0 { notes.forEach { $0.makeKeyAndOrderFront(nil) } }
     }
 
     // MARK: menu / shortcuts

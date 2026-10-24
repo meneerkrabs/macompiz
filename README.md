@@ -23,9 +23,13 @@ source, so you only need a Swift toolchain — no full Xcode, no `metal` CLI.
 | **Markdown notes** | `#`/`##` headings, `**bold**`, `*italic*`, `` `code` `` |
 
 The cube rotates a **real capture of your current desktop** (via
-ScreenCaptureKit) away to reveal the next space. The first time you leave a
-space its live contents are cached as that face; spaces you haven't visited yet
-use a synthetic desktop until you do.
+ScreenCaptureKit) away to reveal the next space. When you have more than one
+macOS Space, macompiz uses the private **SkyLight** API to enumerate them and
+switch for real — masking the switch behind a cover window and capturing the
+*actual* destination desktop as the incoming face. If you only have one Space, or
+the OS refuses the switch, it falls back to a synthetic desktop. All of this runs
+with **SIP enabled**; going further (foreign-app windows, every face live) is the
+[SIP route](docs/SIP.md).
 
 ## Run
 
@@ -50,6 +54,10 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools is enough).
   (`SCScreenshotManager`, a one-shot still) to use as the real outgoing cube
   face. It needs the **Screen Recording** permission; macOS prompts on first use,
   and if it's denied the cube falls back to a synthetic desktop.
+- `SkyLight` resolves private `SLS*` symbols with `dlsym` at runtime (nothing
+  private is linked at build time) to enumerate Spaces, read the active one, and
+  attempt a real Space switch — all from our own process, SIP on. Everything is
+  non-destructive; missing symbols or an OS refusal degrade to the synthetic cube.
 
 ## Scope & the "real compositor" question
 
