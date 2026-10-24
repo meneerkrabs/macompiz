@@ -22,6 +22,11 @@ source, so you only need a Swift toolchain — no full Xcode, no `metal` CLI.
 | **Desktop cube** space switch | `Effects ▸ Next/Prev space` (`⌘]` / `⌘[`) |
 | **Markdown notes** | `#`/`##` headings, `**bold**`, `*italic*`, `` `code` `` |
 
+The cube rotates a **real capture of your current desktop** (via
+ScreenCaptureKit) away to reveal the next space. The first time you leave a
+space its live contents are cached as that face; spaces you haven't visited yet
+use a synthetic desktop until you do.
+
 ## Run
 
 ```bash
@@ -41,6 +46,10 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools is enough).
   noisy bottom-to-top front for the burn.
 - `CubeView` renders two space textures on adjacent cube faces behind a
   perspective camera and rotates 90° to switch — the classic desktop cube.
+- `ScreenCapture` grabs the live desktop with **ScreenCaptureKit**
+  (`SCScreenshotManager`, a one-shot still) to use as the real outgoing cube
+  face. It needs the **Screen Recording** permission; macOS prompts on first use,
+  and if it's denied the cube falls back to a synthetic desktop.
 
 ## Scope & the "real compositor" question
 
@@ -49,15 +58,18 @@ stays in **user space with SIP enabled**: every pixel it distorts is a window it
 drew itself, so it needs no entitlements, no injection, and nothing breaks on a
 macOS update.
 
-Reaching *other* apps' windows (or the real Spaces behind the cube) is a
-different game: on macOS the `WindowServer` is the compositor and an ordinary app
-can't restyle another app's windows. The established routes are capturing with
-**ScreenCaptureKit** (SIP-friendly, read-only) or a **scripting addition loaded
-into Dock/WindowServer** with SIP partially disabled — the approach
-[yabai](https://github.com/koekeishiya/yabai) documents. That injection layer is
-intentionally **not** included here; see yabai and
-[saagarjha's Spaces notes](https://news.ycombinator.com/item?id=23241073) for
-prior art if you want to go there.
+Reaching *other* apps' windows is a different game: on macOS the `WindowServer`
+is the compositor and an ordinary app can't restyle another app's windows. The
+two established routes are **ScreenCaptureKit** (SIP-friendly, read-only — what
+the cube uses to snapshot your desktop) and a **scripting addition loaded into
+Dock/WindowServer** with SIP partially disabled, the approach
+[yabai](https://github.com/koekeishiya/yabai) documents.
+
+ScreenCaptureKit can only snapshot the space you're *currently* on; genuinely
+peeking into other Spaces (to texture every cube face live) needs private
+SkyLight APIs. That injection layer is intentionally **not** included here — see
+yabai and [saagarjha's Spaces notes](https://news.ycombinator.com/item?id=23241073)
+for prior art if you want to go there.
 
 ## License
 

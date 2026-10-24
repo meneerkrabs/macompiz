@@ -73,6 +73,26 @@ final class GPU {
         return (v, v.count)
     }
 
+    // Rasterize a CGImage into a BGRA texture at its native pixel size.
+    func texture(from cg: CGImage) -> MTLTexture {
+        let w = max(1, cg.width), h = max(1, cg.height)
+        let bytesPerRow = w * 4
+        var raw = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+        let bmp = CGBitmapInfo.byteOrder32Little.rawValue |
+                  CGImageAlphaInfo.premultipliedFirst.rawValue
+        let ctx = CGContext(data: &raw, width: w, height: h, bitsPerComponent: 8,
+                            bytesPerRow: bytesPerRow, space: cs, bitmapInfo: bmp)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        desc.usage = [.shaderRead]
+        let tex = device.makeTexture(descriptor: desc)!
+        tex.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0,
+                    withBytes: raw, bytesPerRow: bytesPerRow)
+        return tex
+    }
+
     // Rasterize an NSImage into a BGRA texture at the given pixel size.
     func texture(from image: NSImage, pixelSize: CGSize) -> MTLTexture {
         let w = max(1, Int(pixelSize.width))

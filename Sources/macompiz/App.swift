@@ -9,6 +9,20 @@ final class App {
             DemoImage.write(to: CommandLine.arguments[i + 1])
             exit(0)
         }
+        if CommandLine.arguments.contains("--test-capture") {
+            _ = NSApplication.shared          // TCC needs an app context
+            Task {
+                guard let screen = NSScreen.main else { exit(2) }
+                if let cg = await ScreenCapture.capture(screen: screen) {
+                    print("capture OK: \(cg.width)x\(cg.height)")
+                    exit(0)
+                } else {
+                    print("capture FAILED (permission denied or unavailable)")
+                    exit(3)
+                }
+            }
+            NSApplication.shared.run()
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         let delegate = AppDelegate()
@@ -64,21 +78,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: cube space switching
 
+    // Real desktop captures, cached per space. We can only capture the space
+    // we're currently on (peeking into other Spaces needs private APIs), so each
+    // space's real face is filled the first time we leave it; unseen spaces fall
+    // back to a synthetic desktop.
+    private var realFaces: [Int: MTLTexture] = [:]
+
     private func switchSpace(delta: Int) {
         guard cubeWindow == nil, let screen = NSScreen.main else { return }
         let next = (currentSpace + delta + spaces.count) % spaces.count
         let scale = screen.backingScaleFactor
         let px = CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
+        let fromSpace = currentSpace
 
-        let fromTex = tex(for: currentSpace, px: px)
-        let toTex = tex(for: next, px: px)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // snapshot the live desktop (notes still visible) as the outgoing face
+            if let cg = await ScreenCapture.capture(screen: screen) {
+                self.realFaces[fromSpace] = GPU.shared.texture(from: cg)
+            }
+            guard self.cubeWindow == nil else { return }
 
-        let cube = CubeWindow(screen: screen, faces: [fromTex, toTex], from: 0, to: 1) { [weak self] in
-            self?.endCube(landingOn: next)
+            let fromTex = self.realFaces[fromSpace] ?? self.tex(for: fromSpace, px: px)
+            let toTex = self.realFaces[next] ?? self.tex(for: next, px: px)
+
+            let cube = CubeWindow(screen: screen, faces: [fromTex, toTex], from: 0, to: 1) { [weak self] in
+                self?.endCube(landingOn: next)
+            }
+            self.notes.forEach { $0.orderOut(nil) }
+            cube.makeKeyAndOrderFront(nil)
+            self.cubeWindow = cube
         }
-        notes.forEach { $0.orderOut(nil) }
-        cube.makeKeyAndOrderFront(nil)
-        cubeWindow = cube
     }
 
     private func tex(for i: Int, px: CGSize) -> MTLTexture {
