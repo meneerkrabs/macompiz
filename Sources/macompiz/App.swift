@@ -22,6 +22,41 @@ final class App {
             }
             NSApplication.shared.run()
         }
+        if CommandLine.arguments.contains("--test-livecap") {
+            _ = NSApplication.shared
+            Task {
+                let wins = await ScreenCapture.foreignWindows()
+                guard let w = wins.first(where: { $0.owningApplication?.applicationName == "Finder" })
+                        ?? wins.first else { print("no window"); exit(1) }
+                let cap = LiveCapture()
+                await cap.start(window: w)
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                if let t = cap.texture { print("livecap OK: \(t.width)x\(t.height)") }
+                else { print("livecap FAILED: no texture") }
+                cap.stop()
+                exit(0)
+            }
+            NSApplication.shared.run()
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--sim-drag"),
+           i + 4 < CommandLine.arguments.count {
+            let a = CommandLine.arguments
+            let x1 = Double(a[i+1])!, y1 = Double(a[i+2])!, x2 = Double(a[i+3])!, y2 = Double(a[i+4])!
+            let src = CGEventSource(stateID: .hidSystemState)
+            func post(_ t: CGEventType, _ p: CGPoint) {
+                CGEvent(mouseEventSource: src, mouseType: t, mouseCursorPosition: p, mouseButton: .left)?
+                    .post(tap: .cghidEventTap)
+            }
+            post(.mouseMoved, CGPoint(x: x1, y: y1)); usleep(40_000)
+            post(.leftMouseDown, CGPoint(x: x1, y: y1)); usleep(40_000)
+            for s in 1...16 {
+                let f = Double(s) / 16
+                post(.leftMouseDragged, CGPoint(x: x1 + (x2-x1)*f, y: y1 + (y2-y1)*f))
+                usleep(16_000)
+            }
+            post(.leftMouseUp, CGPoint(x: x2, y: y2))
+            exit(0)
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--render-gifs"),
            i + 1 < CommandLine.arguments.count {
             _ = NSApplication.shared
@@ -114,17 +149,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ]
 
     var burnDemo: (app: String, kind: Int, png: String?)?
+    private var wobbleDaemon: WobbleDaemon?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
         // Ask for Accessibility so foreign-window hide/close work (no SIP needed).
         _ = AXBridge.requestTrust()
+
+        if CommandLine.arguments.contains("--wobble-daemon") {
+            setvbuf(stdout, nil, _IONBF, 0)   // unbuffered so logs survive
+            setActivationPolicyAccessory()
+            let d = WobbleDaemon()
+            if d.start() {
+                wobbleDaemon = d
+                print("wobble daemon: active — drag any window's titlebar to wobble it")
+            } else {
+                print("wobble daemon: could not create event tap (grant Accessibility + Input Monitoring)")
+            }
+            return   // background daemon, no note windows
+        }
+
         if let demo = burnDemo {
             runBurnDemo(appName: demo.app, kind: demo.kind, png: demo.png)
             return
         }
         openNotes()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setActivationPolicyAccessory() {
+        NSApp.setActivationPolicy(.accessory)   // no Dock icon for the daemon
     }
 
     // Scripted equivalent of ⌘B on a chosen app's frontmost window, with a

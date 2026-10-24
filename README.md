@@ -139,6 +139,26 @@ Per-pixel effects (burn/wobble/water) on foreign windows only work through this
 overlay path. Move/hide/close go through the Accessibility API (SIP on); true
 compositor opacity is the one op that needs the optional yabai route.
 
+## System-wide wobble (no SIP) — experimental
+
+```bash
+swift run macompiz --wobble-daemon
+```
+
+A background daemon that makes **any app's window wobble while you drag it** — with
+SIP enabled. It doesn't deform the real window (that's compositor-only); instead a
+`CGEventTap` watches global left-drags, and when one starts on a window's titlebar
+the daemon floats a **live** capture of that window (`SCStream`) running the wobble
+shader, and lets it follow the window macOS is already moving. On release the
+overlay vanishes and the real window is right where you left it.
+
+Needs **Accessibility** (and likely **Input Monitoring**) for the event tap. It's
+a proof-of-concept — honest caveats: a few ms of capture→overlay latency on fast
+flicks, window shadows/rounded corners aren't matched exactly, and apps that block
+capture (DRM/secure input) fall back to no effect. Verified piecewise: the tap
+sees global drags, the topmost-window-under-cursor + titlebar test resolve, and
+`SCStream` yields a live Metal texture (`--test-livecap`).
+
 ## Scope & the "real compositor" question
 
 The original demo pokes at the macOS compositor directly. macompiz deliberately
