@@ -77,6 +77,26 @@ static float fbm(float2 p) {
     return v;
 }
 
+// ===== wobbly windows: spring lattice sampled per vertex ====================
+vertex VOut wobble_vertex(const device float2* grid [[buffer(0)]],
+                          constant WindowUniforms& u [[buffer(1)]],
+                          const device float2* lattice [[buffer(2)]],
+                          uint vid [[vertex_id]]) {
+    constexpr int N = 11;                       // must match WobbleSim.N
+    float2 uv = grid[vid];
+    float fx = uv.x * float(N - 1), fy = uv.y * float(N - 1);
+    int x0 = clamp(int(fx), 0, N - 2), y0 = clamp(int(fy), 0, N - 2);
+    float tx = fx - float(x0), ty = fy - float(y0);
+    float2 a = lattice[y0 * N + x0],     b = lattice[y0 * N + x0 + 1];
+    float2 c = lattice[(y0 + 1) * N + x0], d = lattice[(y0 + 1) * N + x0 + 1];
+    float2 off = mix(mix(a, b, tx), mix(c, d, tx), ty);
+    float2 p = uv + off;
+    VOut o;
+    o.pos = float4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+    o.uv = uv;
+    return o;
+}
+
 // ===== window effects: deformable grid + burn/water =========================
 vertex VOut window_vertex(const device float2* grid [[buffer(0)]],
                           constant WindowUniforms& u [[buffer(1)]],

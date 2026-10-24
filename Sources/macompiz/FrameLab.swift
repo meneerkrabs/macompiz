@@ -28,13 +28,7 @@ enum FrameLab {
         }
 
         print("rendering frames to \(dir)")
-        write("wobbly", windowFrames(note, blue, count: 48) { t, u in
-            u.grabActive = 1
-            u.grabPoint = SIMD2(0.5, 0.18)
-            let decay = exp(-t * 3.0)
-            u.grabVel = SIMD2(sin(t * 18) * 3.2 * decay, cos(t * 13) * 1.2 * decay)
-            u.time = t
-        })
+        write("wobbly", wobbleSimFrames(note, blue))
         write("water", windowFrames(note, blue, count: 54) { t, u in
             u.rippleCount = 8                        // staggered ripples for life
             u.ripples.0 = SIMD4(0.35, 0.35, 0.00, 1)
@@ -53,6 +47,51 @@ enum FrameLab {
         }
         write("cube", cubeFrames(note))
         print("done")
+    }
+
+    // MARK: spring-lattice wobble (Compiz-style)
+    private static func wobbleSimFrames(_ tex: MTLTexture, _ clear: MTLClearColor) -> [CGImage] {
+        let sim = WobbleSim()
+        sim.grab = SIMD2(0.5, 0.06)
+        let lat = GPU.shared.device.makeBuffer(
+            length: WobbleSim.N * WobbleSim.N * MemoryLayout<SIMD2<Float>>.stride,
+            options: .storageModeShared)!
+        let target = makeTarget(W, H)
+        var u = WindowUniforms()
+        u.aspect = Float(W) / Float(H); u.grabActive = 1; u.animKind = 0
+        var out: [CGImage] = []
+        for i in 0..<66 {
+            if i < 7 { sim.tug(SIMD2(0.024, 0.006)) }   // yank right, then let go
+            sim.step(1.0 / 30)
+            sim.disp.withUnsafeBytes { memcpy(lat.contents(), $0.baseAddress!, $0.count) }
+            u.time = Float(i) / 30
+            if let img = renderWobble(target, tex, &u, lat, clear) { out.append(img) }
+        }
+        return out
+    }
+
+    private static func renderWobble(_ target: MTLTexture, _ tex: MTLTexture,
+                                     _ u: inout WindowUniforms, _ lat: MTLBuffer,
+                                     _ clear: MTLClearColor) -> CGImage? {
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = target
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = clear
+        rpd.colorAttachments[0].storeAction = .store
+        guard let cmd = GPU.shared.queue.makeCommandBuffer(),
+              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+        enc.setRenderPipelineState(GPU.shared.wobblePipeline)
+        enc.setVertexBuffer(GPU.shared.gridBuffer, offset: 0, index: 0)
+        enc.setVertexBuffer(lat, offset: 0, index: 2)
+        withUnsafeBytes(of: &u) {
+            enc.setVertexBytes($0.baseAddress!, length: $0.count, index: 1)
+            enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 1)
+        }
+        enc.setFragmentTexture(tex, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: GPU.shared.gridCount)
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        return readback(target)
     }
 
     // MARK: window pipeline frames

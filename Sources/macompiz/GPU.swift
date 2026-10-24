@@ -10,6 +10,7 @@ final class GPU {
     let device: MTLDevice
     let queue: MTLCommandQueue
     let windowPipeline: MTLRenderPipelineState
+    let wobblePipeline: MTLRenderPipelineState
     let cubePipeline: MTLRenderPipelineState
     let gridBuffer: MTLBuffer
     let gridCount: Int
@@ -31,6 +32,7 @@ final class GPU {
         }
 
         windowPipeline = GPU.makePipeline(dev, lib, "window_vertex", "window_fragment")
+        wobblePipeline = GPU.makePipeline(dev, lib, "wobble_vertex", "window_fragment")
         cubePipeline   = GPU.makePipeline(dev, lib, "cube_vertex",   "cube_fragment")
 
         let (verts, count) = GPU.makeGrid(GPU.gridDim)
