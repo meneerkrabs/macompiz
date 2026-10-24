@@ -8,10 +8,11 @@ struct WindowUniforms {
     var grabVel:   SIMD2<Float> = .zero   // uv/sec, clamped
     var grabActive: Float = 0
     var time: Float = 0                    // seconds since the effect started
-    var burn: Float = 0                    // 0 = intact, 1 = fully burned away
+    var anim: Float = 0                    // 0 = intact, 1 = animation complete
     var aspect: Float = 1                  // width / height
     var rippleCount: Float = 0
-    var _pad0: Float = 0
+    var animKind: Float = 0                // 0 none, 1 burn, 2 glide, 3 explode,
+                                           // 4 magic lamp, 5 sidekick, 6 fold
     var ripples: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                   SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) =
         (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
@@ -34,10 +35,10 @@ struct WindowUniforms {
     float2 grabVel;
     float  grabActive;
     float  time;
-    float  burn;
+    float  anim;
     float  aspect;
     float  rippleCount;
-    float  _pad0;
+    float  animKind;
     float4 ripples[8];
 };
 
@@ -82,8 +83,33 @@ vertex VOut window_vertex(const device float2* grid [[buffer(0)]],
                           uint vid [[vertex_id]]) {
     float2 uv = grid[vid];
     float2 p = uv;
+    float2 c = float2(0.5, 0.5);
 
-    if (u.grabActive > 0.5) {
+    if (u.animKind > 1.5) {
+        // --- Compiz Fusion close animations (geometry) ---
+        float a = u.anim;
+        if (u.animKind < 2.5) {                 // Glide: shrink back + drift
+            p = c + (p - c) * (1.0 - 0.35 * a);
+            p.y += 0.12 * a;
+        } else if (u.animKind < 3.5) {          // Explode: scatter on noise
+            float n = fract(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453);
+            float2 dir = normalize(uv - c + 1e-4);
+            p += dir * (0.1 + n * 0.6) * a;
+        } else if (u.animKind < 4.5) {          // Magic Lamp: genie to bottom
+            float pinch = mix(1.0, 0.05, a * smoothstep(0.0, 1.0, uv.y));
+            p.x = 0.5 + (uv.x - 0.5) * pinch;
+            p.y = mix(uv.y, 1.0, a * a);
+        } else if (u.animKind < 5.5) {          // Sidekick: spin + shrink
+            float ang = a * 6.2831853;
+            float s = 1.0 - a;
+            float2 q = p - c;
+            float ca = cos(ang), sa = sin(ang);
+            p = c + float2(q.x * ca - q.y * sa, q.x * sa + q.y * ca) * s;
+        } else {                                // Curved Fold: collapse upward
+            p.y = mix(uv.y, 0.0, a);
+            p.x = c.x + (uv.x - c.x) * (1.0 - 0.5 * a);
+        }
+    } else if (u.grabActive > 0.5) {
         // Body lags behind the cursor -> jelly "wobbly windows".
         float d = distance(uv, u.grabPoint);
         float w = smoothstep(0.0, 1.3, d);
@@ -120,11 +146,11 @@ fragment float4 window_fragment(VOut in [[stage_in]],
 
     float4 col = tex.sample(smp, uv);
 
-    // burn: a noisy front sweeps bottom -> top, charring then clearing
-    if (u.burn > 0.001) {
+    if (u.animKind > 0.5 && u.animKind < 1.5 && u.anim > 0.001) {
+        // Burn: a noisy front sweeps bottom -> top, charring then clearing
         float n2 = fbm(in.uv * float2(9.0, 14.0));
         float threshold = (1.0 - in.uv.y) * 0.72 + n2 * 0.30;
-        float front = u.burn * 1.35;
+        float front = u.anim * 1.35;
         if (threshold < front - 0.06) {
             col.a = 0.0;                                   // burned away
         } else if (threshold < front) {
@@ -134,6 +160,9 @@ fragment float4 window_fragment(VOut in [[stage_in]],
             col.rgb = mix(col.rgb, fire, 0.85);
             col.a = 1.0;
         }
+    } else if (u.animKind > 1.5) {
+        // geometric close animations fade out as they finish
+        col.a *= clamp(1.0 - u.anim, 0.0, 1.0);
     }
     return col;
 }

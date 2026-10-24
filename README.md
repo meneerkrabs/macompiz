@@ -18,9 +18,21 @@ source, so you only need a Swift toolchain — no full Xcode, no `metal` CLI.
 | --- | --- |
 | **Wobbly window** (jelly lag) | Drag a note by its body |
 | **Water / aquarium** ripples | Click a note, or `Effects ▸ Splash` (`⌘W`) |
-| **Burn to close** | Click the red traffic light |
 | **Desktop cube** space switch | `Effects ▸ Next/Prev space` (`⌘]` / `⌘[`) |
 | **Markdown notes** | `#`/`##` headings, `**bold**`, `*italic*`, `` `code` `` |
+
+Plus a set of **Compiz Fusion close animations**, selectable from the
+*Animations* menu and run on the frontmost window (the red traffic light uses the
+same set on a note):
+
+| Animation | Key | Compiz Fusion original |
+| --- | --- | --- |
+| **Burn** | `⌘B` | Animation plugin "Burn" |
+| **Glide** | `⌘1` | Animation "Glide" |
+| **Explode** | `⌘2` | Animationaddon "Explode" |
+| **Magic Lamp** | `⌘3` | "Magic Lamp" minimize genie |
+| **Sidekick** | `⌘4` | Animation "Sidekick" (spin) |
+| **Curved Fold** | `⌘5` | Animation "Curved Fold" |
 
 The cube rotates a **real capture of your current desktop** (via
 ScreenCaptureKit) away to reveal the next space. When you have more than one
@@ -76,12 +88,16 @@ capture-and-overlay:
 
 The bridge is the only privileged piece. `CompositorBridge` has two
 implementations: `YabaiBridge`, which drives an already-installed
-[yabai](https://github.com/koekeishiya/yabai) (its audited scripting addition is
-what actually touches foreign windows, and needs SIP partially disabled — see
-[docs/SIP.md](docs/SIP.md)); and `NullBridge`, the default, where there's no
-privileged helper. With `NullBridge` the burn still plays as a **visual-only**
-overlay, but the real window can't be hidden or closed. macompiz ships **no
-injector of its own** — the privileged code stays in yabai.
+[yabai](https://github.com/koekeishiya/yabai); and `NullBridge`, the default.
+
+**Reality check on current macOS (tested, Tahoe 26, SIP on):** yabai with just
+the Accessibility permission gives us window *enumeration*, but modifying foreign
+windows — `--opacity` (hide during the effect) **and** `--close` (remove at the
+end) — both require yabai's scripting addition, which needs SIP partially
+disabled (`yabai --load-sa`, from Recovery; see [docs/SIP.md](docs/SIP.md)).
+Until then the animations still play as a **visual-only** overlay on a captured
+copy, but the real window stays. macompiz ships **no injector of its own** — the
+privileged code stays in yabai.
 
 Per-pixel effects (burn/wobble/water) on foreign windows only work through this
 overlay path. Plain window ops (opacity, move, close) go straight through the

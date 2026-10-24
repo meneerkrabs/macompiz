@@ -61,10 +61,12 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
     private var ripples = [SIMD4<Float>](repeating: .zero, count: 8)
     private var rippleHead = 0
 
-    // burn
-    private var burning = false
-    private var burnProgress: Float = 0
-    var onBurnedAway: (() -> Void)?
+    // close animation (Compiz Fusion style)
+    private var closing = false
+    private var closeProgress: Float = 0
+    var closeKind: Int = 1              // 1 burn, 2 glide, 3 explode, 4 magic lamp,
+                                        // 5 sidekick, 6 fold — set by the app
+    var onClosed: (() -> Void)?
 
     private let external: Bool
 
@@ -122,7 +124,7 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
         let u = uv(for: event)
         // red traffic light hit region (top-left of the drawn titlebar)
         if u.y < 0.12 && u.x < 0.10 {
-            startBurn(); return
+            startClose(kind: closeKind); return
         }
         spawnRipple(at: u)
         grabbing = true
@@ -150,9 +152,12 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
         grabbing = false   // velocity decays in the tick loop -> settles
     }
 
-    func startBurn() {
-        guard !burning else { return }
-        burning = true
+    func startBurn() { startClose(kind: 1) }
+
+    func startClose(kind: Int) {
+        guard !closing else { return }
+        closeKind = kind
+        closing = true
     }
 
     private func spawnRipple(at uvPoint: SIMD2<Float>) {
@@ -179,13 +184,15 @@ final class NoteMetalView: MTKView, MTKViewDelegate {
         uniforms.grabActive = (grabbing || simd_length(vel) > 0.02) ? 1 : 0
         uniforms.grabVel = vel
 
-        // advance burn
-        if burning {
-            burnProgress = min(1, burnProgress + dt * 0.9)
-            uniforms.burn = burnProgress
-            if burnProgress >= 1 {
-                burning = false
-                onBurnedAway?()
+        // advance close animation
+        if closing {
+            let speed: Float = (closeKind == 1) ? 0.9 : 1.7   // burn is slower
+            closeProgress = min(1, closeProgress + dt * speed)
+            uniforms.anim = closeProgress
+            uniforms.animKind = Float(closeKind)
+            if closeProgress >= 1 {
+                closing = false
+                onClosed?()
                 hostWindow?.orderOut(nil)
                 return
             }

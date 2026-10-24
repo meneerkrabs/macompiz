@@ -58,8 +58,10 @@ final class App {
         let delegate = AppDelegate()
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--burn-demo"), i + 1 < args.count {
-            let png = (i + 2 < args.count && !args[i + 2].hasPrefix("--")) ? args[i + 2] : nil
-            delegate.burnDemo = (app: args[i + 1], png: png)
+            var kind = 1, png: String? = nil, j = i + 2
+            if j < args.count, let k = Int(args[j]) { kind = k; j += 1 }
+            if j < args.count, !args[j].hasPrefix("--") { png = args[j] }
+            delegate.burnDemo = (app: args[i + 1], kind: kind, png: png)
         }
         app.delegate = delegate
         app.run()
@@ -90,12 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          NSColor(srgbRed: 0.35, green: 0.25, blue: 0.70, alpha: 1)),
     ]
 
-    var burnDemo: (app: String, png: String?)?
+    var burnDemo: (app: String, kind: Int, png: String?)?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
         if let demo = burnDemo {
-            runBurnDemo(appName: demo.app, png: demo.png)
+            runBurnDemo(appName: demo.app, kind: demo.kind, png: demo.png)
             return
         }
         openNotes()
@@ -104,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Scripted equivalent of ⌘B on a chosen app's frontmost window, with a
     // mid-burn self-capture of just our overlay (no desktop leak), then exit.
-    private func runBurnDemo(appName: String, png: String?) {
+    private func runBurnDemo(appName: String, kind: Int, png: String?) {
         guard let screen = NSScreen.main else { exit(2) }
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -114,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("burn-demo: no \(appName) window found"); exit(3)
             }
             print("burn-demo: \(target.owningApplication?.applicationName ?? "?") " +
-                  "\"\(target.title ?? "")\" frame=\(target.frame)")
+                  "\"\(target.title ?? "")\" kind=\(kind) bridge=\(self.bridge.name) frame=\(target.frame)")
 
             let tex = GPU.shared.texture(from: cg)
             let frame = self.toAppKitFrame(target.frame, screen: screen)
@@ -123,10 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.bridge.available { self.bridge.setOpacity(wid, 0.0) }
             overlay.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
-            overlay.noteView.startBurn()
+            overlay.noteView.startClose(kind: kind)
 
             if let png {
-                try? await Task.sleep(nanoseconds: 550_000_000)      // mid-burn
+                let mid: UInt64 = (kind == 1) ? 550_000_000 : 240_000_000
+                try? await Task.sleep(nanoseconds: mid)              // mid-animation
                 if let shot = await ScreenCapture.captureWindowID(CGWindowID(overlay.windowNumber)) {
                     GPU.savePNG(shot, to: png)
                     print("burn-demo: saved overlay capture to \(png)")
@@ -148,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         for (t, b, o, s) in samples {
             let w = NoteWindow(title: t, body: b, origin: o, size: s)
-            w.noteView.onBurnedAway = { [weak self, weak w] in
+            w.noteView.onClosed = { [weak self, weak w] in
                 guard let w = w else { return }
                 self?.notes.removeAll { $0 === w }
             }
@@ -249,10 +252,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: foreign windows (capture + overlay effect)
 
-    // Burn the frontmost other-app window: capture it, hide the real one via the
-    // bridge (if present), and run the burn on a floating copy. Without a bridge
-    // it's a visual-only overlay — the effect plays but the real window stays.
-    @objc private func burnForeground() {
+    // Run a close animation on the frontmost other-app window: capture it, try to
+    // hide the real one via the bridge (needs the scripting addition), run the
+    // effect on a floating copy, then close the real window via the bridge. With
+    // no bridge it's visual-only — the effect plays but the window stays.
+    @objc private func burnForeground() { closeForeground(kind: 1) }
+
+    private func closeForeground(kind: Int) {
         guard let screen = NSScreen.main else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -266,18 +272,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let overlay = NoteWindow(foreignTexture: tex, frame: frame)
             let wid = CGWindowID(target.windowID)
             let hid = self.bridge.available
-            if hid { self.bridge.setOpacity(wid, 0.0) }
+            if hid { self.bridge.setOpacity(wid, 0.0) }   // no-op without the SA
 
-            overlay.noteView.onBurnedAway = { [weak self, weak overlay] in
+            overlay.noteView.onClosed = { [weak self, weak overlay] in
                 overlay?.orderOut(nil)
                 if let overlay { self?.foreignOverlays.removeAll { $0 === overlay } }
-                if hid { self?.bridge.close(wid) }
+                if hid { self?.bridge.close(wid) }        // real close (AX, SIP-on OK)
             }
             overlay.makeKeyAndOrderFront(nil)
-            overlay.noteView.startBurn()
+            overlay.noteView.startClose(kind: kind)
             self.foreignOverlays.append(overlay)
         }
     }
+
+    @objc private func glideForeground()   { closeForeground(kind: 2) }
+    @objc private func explodeForeground()  { closeForeground(kind: 3) }
+    @objc private func lampForeground()      { closeForeground(kind: 4) }
+    @objc private func spinForeground()      { closeForeground(kind: 5) }
+    @objc private func foldForeground()      { closeForeground(kind: 6) }
 
     // CG top-left window frame -> AppKit bottom-left screen frame (single display).
     private func toAppKitFrame(_ cg: CGRect, screen: NSScreen) -> CGRect {
@@ -304,8 +316,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add(fxMenu, "Next space (cube)",  #selector(nextSpace), "]")
         add(fxMenu, "Prev space (cube)",  #selector(prevSpace), "[")
         add(fxMenu, "Splash (water)",     #selector(splash),    "w")
-        add(fxMenu, "Burn frontmost window", #selector(burnForeground), "b")
         add(fxMenu, "New note",           #selector(newNote),   "n")
+
+        // Compiz Fusion close animations on the frontmost foreign window
+        let anim = NSMenuItem()
+        main.addItem(anim)
+        let animMenu = NSMenu(title: "Animations")
+        anim.submenu = animMenu
+        animMenu.title = "Animations"
+        add(animMenu, "Burn frontmost window",      #selector(burnForeground),    "b")
+        add(animMenu, "Glide frontmost window",     #selector(glideForeground),   "1")
+        add(animMenu, "Explode frontmost window",   #selector(explodeForeground), "2")
+        add(animMenu, "Magic Lamp frontmost window", #selector(lampForeground),   "3")
+        add(animMenu, "Sidekick frontmost window",  #selector(spinForeground),    "4")
+        add(animMenu, "Curved Fold frontmost window", #selector(foldForeground),  "5")
 
         NSApp.mainMenu = main
     }
@@ -327,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                            origin: CGPoint(x: f.midX - 150 + CGFloat(notes.count) * 24,
                                            y: f.midY - 110 - CGFloat(notes.count) * 24),
                            size: CGSize(width: 360, height: 240))
-        w.noteView.onBurnedAway = { [weak self, weak w] in
+        w.noteView.onClosed = { [weak self, weak w] in
             guard let w = w else { return }; self?.notes.removeAll { $0 === w } }
         w.makeKeyAndOrderFront(nil)
         notes.append(w)
