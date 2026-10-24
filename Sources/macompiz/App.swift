@@ -56,6 +56,11 @@ final class App {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         let delegate = AppDelegate()
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--burn-demo"), i + 1 < args.count {
+            let png = (i + 2 < args.count && !args[i + 2].hasPrefix("--")) ? args[i + 2] : nil
+            delegate.burnDemo = (app: args[i + 1], png: png)
+        }
         app.delegate = delegate
         app.run()
     }
@@ -85,10 +90,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          NSColor(srgbRed: 0.35, green: 0.25, blue: 0.70, alpha: 1)),
     ]
 
+    var burnDemo: (app: String, png: String?)?
+
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
+        if let demo = burnDemo {
+            runBurnDemo(appName: demo.app, png: demo.png)
+            return
+        }
         openNotes()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // Scripted equivalent of ⌘B on a chosen app's frontmost window, with a
+    // mid-burn self-capture of just our overlay (no desktop leak), then exit.
+    private func runBurnDemo(appName: String, png: String?) {
+        guard let screen = NSScreen.main else { exit(2) }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let wins = await ScreenCapture.foreignWindows()
+            let target = wins.first { $0.owningApplication?.applicationName == appName } ?? wins.first
+            guard let target, let cg = await ScreenCapture.captureWindow(target) else {
+                print("burn-demo: no \(appName) window found"); exit(3)
+            }
+            print("burn-demo: \(target.owningApplication?.applicationName ?? "?") " +
+                  "\"\(target.title ?? "")\" frame=\(target.frame)")
+
+            let tex = GPU.shared.texture(from: cg)
+            let frame = self.toAppKitFrame(target.frame, screen: screen)
+            let overlay = NoteWindow(foreignTexture: tex, frame: frame)
+            let wid = CGWindowID(target.windowID)
+            if self.bridge.available { self.bridge.setOpacity(wid, 0.0) }
+            overlay.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            overlay.noteView.startBurn()
+
+            if let png {
+                try? await Task.sleep(nanoseconds: 550_000_000)      // mid-burn
+                if let shot = await ScreenCapture.captureWindowID(CGWindowID(overlay.windowNumber)) {
+                    GPU.savePNG(shot, to: png)
+                    print("burn-demo: saved overlay capture to \(png)")
+                }
+            }
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            if self.bridge.available { self.bridge.close(wid) }
+            exit(0)
+        }
     }
 
     private func openNotes() {

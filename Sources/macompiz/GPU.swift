@@ -73,6 +73,13 @@ final class GPU {
         return (v, v.count)
     }
 
+    static func savePNG(_ cg: CGImage, to path: String) {
+        let rep = NSBitmapImageRep(cgImage: cg)
+        if let d = rep.representation(using: .png, properties: [:]) {
+            try? d.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     // Rasterize a CGImage into a BGRA texture at its native pixel size.
     func texture(from cg: CGImage) -> MTLTexture {
         let w = max(1, cg.width), h = max(1, cg.height)

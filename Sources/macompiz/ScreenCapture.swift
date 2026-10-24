@@ -53,6 +53,17 @@ enum ScreenCapture {
         } catch { return [] }
     }
 
+    /// Capture a window by its CGWindowID (includes our own windows).
+    static func captureWindowID(_ id: CGWindowID) async -> CGImage? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            guard let w = content.windows.first(where: { CGWindowID($0.windowID) == id })
+            else { return nil }
+            return await captureWindow(w)
+        } catch { return nil }
+    }
+
     /// Capture a single window's current pixels (SIP-friendly, read-only).
     static func captureWindow(_ window: SCWindow) async -> CGImage? {
         do {
