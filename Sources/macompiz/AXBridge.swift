@@ -78,6 +78,28 @@ final class AXBridge: CompositorBridge {
         return s
     }
 
+    // Read a window's position (AX uses CG top-left screen coords).
+    func cgPosition(of id: CGWindowID) -> CGPoint? {
+        guard let w = element(for: id) else { return nil }
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &v) == .success,
+              let val = v, CFGetTypeID(val) == AXValueGetTypeID() else { return nil }
+        var p = CGPoint.zero
+        AXValueGetValue(val as! AXValue, .cgPoint, &p)
+        return p
+    }
+
+    // Move a window to a CG top-left position.
+    func move(_ id: CGWindowID, toCG p: CGPoint) {
+        guard let w = element(for: id) else { return }
+        var pt = p
+        if let v = AXValueCreate(.cgPoint, &pt) {
+            AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, v)
+        }
+    }
+
+    func forget(_ id: CGWindowID) { cache[CGWindowID(id)] = nil }
+
     // MARK: lookup
     private func element(for id: CGWindowID) -> AXUIElement? {
         if let cached = cache[id] { return cached }
