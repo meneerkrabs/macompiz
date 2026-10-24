@@ -19,12 +19,6 @@ final class WobbleOverlay: NSWindow {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         contentView = view
     }
-
-    func nudge(dx: CGFloat, dy: CGFloat) {
-        var o = frame.origin
-        o.x += dx; o.y += dy
-        setFrameOrigin(o)
-    }
 }
 
 final class WobbleView: MTKView, MTKViewDelegate {
@@ -34,6 +28,12 @@ final class WobbleView: MTKView, MTKViewDelegate {
     private var uniforms = WindowUniforms()
     private var clock: Float = 0
     private var last = CACurrentMediaTime()
+
+    // self-positioning: the view parks its own window under the cursor each frame
+    var cursorProvider: (() -> CGPoint)?    // latest cursor in CG (top-left) coords
+    var grabOffsetCG = CGPoint.zero         // cursor - window origin, at grab time
+    private let screenH = CGDisplayBounds(CGMainDisplayID()).height
+    private var lastOriginCG: CGPoint?
 
     init(frame: CGRect, capture: LiveCapture) {
         self.capture = capture
@@ -54,17 +54,26 @@ final class WobbleView: MTKView, MTKViewDelegate {
     }
     required init(coder: NSCoder) { fatalError() }
 
-    // feed the window motion into the spring lattice
-    func feed(dx: CGFloat, dy: CGFloat, dt: Float) {
-        sim.tug(SIMD2(Float(dx) / Float(bounds.width), Float(dy) / Float(bounds.height)))
-    }
+    func setGrab(_ uv: SIMD2<Float>) { sim.grab = uv }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
         let now = CACurrentMediaTime(); let dt = Float(now - last); last = now; clock += dt
+
+        // keep the window exactly under the cursor, and feed its motion as wobble
+        if let cp = cursorProvider?() {
+            let originCG = CGPoint(x: cp.x - grabOffsetCG.x, y: cp.y - grabOffsetCG.y)
+            if let prev = lastOriginCG {
+                let ddx = Float(originCG.x - prev.x), ddy = Float(originCG.y - prev.y)
+                sim.tug(SIMD2(ddx / Float(bounds.width), ddy / Float(bounds.height)))
+            }
+            lastOriginCG = originCG
+            window?.setFrameOrigin(CGPoint(x: originCG.x, y: screenH - (originCG.y + bounds.height)))
+        }
+
         sim.step(dt)
-        sim.disp.withUnsafeBytes { memcpy(lattice.contents(), $0.baseAddress!, $0.count) }
+        _ = sim.disp.withUnsafeBytes { memcpy(lattice.contents(), $0.baseAddress!, $0.count) }
         guard let tex = capture.texture else { return }
 
         uniforms.time = clock

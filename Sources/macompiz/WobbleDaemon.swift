@@ -16,8 +16,7 @@ final class WobbleDaemon {
     private var armedWindowID: CGWindowID?
     private var armedBounds: CGRect = .zero       // CG top-left frame at mouseDown
     private var startPoint: CGPoint = .zero
-    private var lastPoint: CGPoint = .zero
-    private var lastTime = CACurrentMediaTime()
+    private var latestCursor: CGPoint = .zero     // read by the overlay each frame
     private var engaged = false
 
     private var capture: LiveCapture?
@@ -48,6 +47,7 @@ final class WobbleDaemon {
             return false
         }
         let p = event.location
+        latestCursor = p                              // cheap: no heavy work in the tap
         switch type {
         case .leftMouseDown:
             armForDrag(at: p)
@@ -56,7 +56,6 @@ final class WobbleDaemon {
         case .leftMouseDragged:
             guard armedWindowID != nil else { return false }
             if !engaged, hypot(p.x - startPoint.x, p.y - startPoint.y) > 6 { engage() }
-            if engaged { track(to: p) }
             return true                               // we own the drag now
 
         case .leftMouseUp:
@@ -77,8 +76,6 @@ final class WobbleDaemon {
         armedWindowID = id
         armedBounds = bounds
         startPoint = p
-        lastPoint = p
-        lastTime = CACurrentMediaTime()
     }
 
     private func engage() {
@@ -89,6 +86,11 @@ final class WobbleDaemon {
         capture = cap
         let ov = WobbleOverlay(frame: nsFrame, capture: cap)
         overlay = ov
+        let off = CGPoint(x: startPoint.x - armedBounds.minX, y: startPoint.y - armedBounds.minY)
+        ov.view.grabOffsetCG = off
+        ov.view.setGrab(SIMD2(Float(off.x / max(1, armedBounds.width)),
+                              Float(off.y / max(1, armedBounds.height))))
+        ov.view.cursorProvider = { [weak self] in self?.latestCursor ?? .zero }
         ov.orderFront(nil)
         let hideY = armedBounds.minY
         Task { @MainActor in
@@ -104,16 +106,6 @@ final class WobbleDaemon {
                 self.ax.move(id, toCG: CGPoint(x: -30000, y: hideY))
             }
         }
-    }
-
-    private func track(to p: CGPoint) {
-        let now = CACurrentMediaTime()
-        let dt = Float(now - lastTime)
-        let dx = p.x - lastPoint.x, dy = p.y - lastPoint.y
-        overlay?.nudge(dx: dx, dy: -dy)               // CG y-down -> NS y-up
-        overlay?.view.feed(dx: dx, dy: dy, dt: dt)
-        lastPoint = p
-        lastTime = now
     }
 
     private func end() {

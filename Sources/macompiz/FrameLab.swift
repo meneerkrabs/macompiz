@@ -63,7 +63,7 @@ enum FrameLab {
         for i in 0..<66 {
             if i < 7 { sim.tug(SIMD2(0.024, 0.006)) }   // yank right, then let go
             sim.step(1.0 / 30)
-            sim.disp.withUnsafeBytes { memcpy(lat.contents(), $0.baseAddress!, $0.count) }
+            _ = sim.disp.withUnsafeBytes { memcpy(lat.contents(), $0.baseAddress!, $0.count) }
             u.time = Float(i) / 30
             if let img = renderWobble(target, tex, &u, lat, clear) { out.append(img) }
         }

@@ -1,3 +1,4 @@
+import AppKit
 import ScreenCaptureKit
 import CoreVideo
 import Metal
@@ -24,11 +25,13 @@ final class LiveCapture: NSObject, SCStreamOutput {
     func start(window: SCWindow) async {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let cfg = SCStreamConfiguration()
-        cfg.width = Int(window.frame.width * 2)
-        cfg.height = Int(window.frame.height * 2)
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        cfg.width = Int(window.frame.width * scale)
+        cfg.height = Int(window.frame.height * scale)
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.showsCursor = false
         cfg.queueDepth = 3
+        cfg.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         let s = SCStream(filter: filter, configuration: cfg, delegate: nil)
         do {
             try s.addStreamOutput(self, type: .screen,
