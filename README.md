@@ -146,18 +146,29 @@ swift run macompiz --wobble-daemon
 ```
 
 A background daemon that makes **any app's window wobble while you drag it** — with
-SIP enabled. It doesn't deform the real window (that's compositor-only); instead a
-`CGEventTap` watches global left-drags, and when one starts on a window's titlebar
-the daemon floats a **live** capture of that window (`SCStream`) running the wobble
-shader, and lets it follow the window macOS is already moving. On release the
-overlay vanishes and the real window is right where you left it.
+SIP enabled. No app can deform another app's live surface (that's compositor-only),
+so the daemon fakes it convincingly:
 
-Needs **Accessibility** (and likely **Input Monitoring**) for the event tap. It's
-a proof-of-concept — honest caveats: a few ms of capture→overlay latency on fast
-flicks, window shadows/rounded corners aren't matched exactly, and apps that block
-capture (DRM/secure input) fall back to no effect. Verified piecewise: the tap
-sees global drags, the topmost-window-under-cursor + titlebar test resolve, and
-`SCStream` yields a live Metal texture (`--test-livecap`).
+1. a `CGEventTap` watches global left-drags; a drag starting on a titlebar engages;
+2. the window is **live-captured** with `SCStream` and the real one is hidden
+   off-screen via the Accessibility API (once the first frame is in, so there's no
+   blank flash);
+3. a floating overlay runs the **spring-lattice** wobble on the capture and parks
+   itself exactly under the cursor every frame;
+4. on release the real window is placed where the overlay ended.
+
+The wobble is a real **spring-mass lattice** (`WobbleSim`, the Compiz model): an
+11×11 grid of masses linked by springs, the grabbed node pinned to the cursor while
+the rest lag and oscillate — gooey trail, overshoot, settle.
+
+Needs **Accessibility** and **Input Monitoring** (the tap only *records* the cursor
+there — all rendering/positioning runs in the overlay's 60 fps loop, so the input
+path stays responsive). It's a proof-of-concept — honest caveats: a few ms of
+capture→overlay latency on fast flicks, window shadows/rounded corners aren't
+matched exactly, the drag is macompiz-driven (no edge-snapping / Stage Manager mid-
+drag), and apps that block capture (DRM/secure input) fall back to no effect.
+Verified piecewise: the tap sees global drags, the topmost-window + titlebar test
+resolve, and `SCStream` yields a live Metal texture (`--test-livecap`).
 
 ## Scope & the "real compositor" question
 
