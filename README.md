@@ -10,6 +10,14 @@ It's a small AppKit + Metal app. The note windows are drawn by the app itself
 window's rendered texture in real time. Shaders are compiled **at runtime** from
 source, so you only need a Swift toolchain — no full Xcode, no `metal` CLI.
 
+> **Everything here runs with SIP *enabled*.** No `csrutil`, no Recovery, no
+> scripting addition, no kernel/daemon injection. Own-window effects, the cube
+> with a real ScreenCaptureKit desktop grab, Space queries via SkyLight, and even
+> burning/closing **another app's** window (hidden via the Accessibility API, then
+> closed) all work with System Integrity Protection on — verified on macOS 26.
+> The only thing SIP-off would add is true live-window compositor *opacity* via
+> yabai, which macompiz replaces with an off-screen trick and does not require.
+
 ![demo](docs/demo.png)
 
 ## Effects in motion
@@ -91,17 +99,19 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools is enough).
   installed yabai; `NoteWindow(foreignTexture:frame:)` reuses the effect pipeline
   to burn a captured copy of another app's window. See *Foreign windows* above.
 
-## Foreign windows (experimental)
+## Foreign windows (works with SIP enabled)
 
-`Effects ▸ Burn frontmost window` (`⌘B`) runs the burn on **another app's**
-window. Since no app can run a shader inside a foreign window, it works by
-capture-and-overlay:
+`Effects ▸ Burn frontmost window` (`⌘B`) runs any of the animations on **another
+app's** window. Since no app can run a shader inside a foreign window, it works by
+capture-and-overlay — entirely with SIP on:
 
-1. enumerate on-screen windows and capture the target live (ScreenCaptureKit,
-   SIP on — verified: see `--test-foreign`);
-2. ask a **compositor bridge** to hide the real window (`setOpacity(0)`);
-3. float a macompiz overlay of the captured pixels and burn *that*;
-4. close the real window through the bridge when the burn finishes.
+1. enumerate on-screen windows and capture the target live (ScreenCaptureKit);
+2. hide the real window via the **Accessibility** API (move it off-screen);
+3. float a macompiz overlay of the captured pixels and run the effect on *that*;
+4. close the real window via the Accessibility API when the effect finishes.
+
+No Recovery, no scripting addition, no injection — verified on macOS 26 (SIP on):
+the real window is hidden during the burn and actually closed afterwards.
 
 `CompositorBridge` has three implementations, picked best-first:
 
@@ -126,8 +136,8 @@ macompiz ships **no injector of its own**; the only SIP-gated path routes throug
 yabai, and the default path avoids it entirely.
 
 Per-pixel effects (burn/wobble/water) on foreign windows only work through this
-overlay path. Plain window ops (opacity, move, close) go straight through the
-bridge to every window.
+overlay path. Move/hide/close go through the Accessibility API (SIP on); true
+compositor opacity is the one op that needs the optional yabai route.
 
 ## Scope & the "real compositor" question
 
@@ -136,18 +146,19 @@ stays in **user space with SIP enabled**: every pixel it distorts is a window it
 drew itself, so it needs no entitlements, no injection, and nothing breaks on a
 macOS update.
 
-Reaching *other* apps' windows is a different game: on macOS the `WindowServer`
-is the compositor and an ordinary app can't restyle another app's windows. The
-two established routes are **ScreenCaptureKit** (SIP-friendly, read-only — what
-the cube uses to snapshot your desktop) and a **scripting addition loaded into
-Dock/WindowServer** with SIP partially disabled, the approach
-[yabai](https://github.com/koekeishiya/yabai) documents.
+On macOS the `WindowServer` is the compositor and an ordinary app can't *restyle*
+another app's live window. macompiz sidesteps that without weakening the system:
+it **captures** the window (ScreenCaptureKit), runs the effect on the copy, and
+uses the **Accessibility** API to hide and close the real one — all SIP-on.
 
-ScreenCaptureKit can only snapshot the space you're *currently* on; genuinely
-peeking into other Spaces (to texture every cube face live) needs private
-SkyLight APIs. That injection layer is intentionally **not** included here — see
-yabai and [saagarjha's Spaces notes](https://news.ycombinator.com/item?id=23241073)
-for prior art if you want to go there.
+The only things that genuinely need SIP partially disabled (a scripting addition
+loaded into Dock/WindowServer, the [yabai](https://github.com/koekeishiya/yabai)
+approach) are *true live-window compositor effects* — e.g. real per-window opacity
+without the off-screen trick, or live-texturing every cube face from other Spaces.
+Those are **optional** and intentionally **not** shipped here; the default path
+avoids them entirely. See `docs/SIP.md` and
+[saagarjha's Spaces notes](https://news.ycombinator.com/item?id=23241073) if you
+want to go there.
 
 ## License
 
